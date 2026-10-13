@@ -40985,3 +40985,63 @@ async fn csr_confirmation_puts_the_decision_to_the_approval_subresource() {
         );
     }
 }
+
+#[tokio::test]
+async fn csr_decision_matches_namespace_scoped_guardrails() {
+    let mut app = csr_app(&[csr("csr-a", json!([]))]);
+    app.guardrails = vec![crate::config::Guardrail {
+        actions: vec!["approve".into()],
+        namespaces: vec!["prod-*".into()],
+        deny: true,
+        ..Default::default()
+    }];
+    app.handle_key(press(KeyCode::Char('V'))).unwrap();
+    assert_eq!(app.mode, Mode::Table);
+    assert!(app.confirm_action.is_none());
+    assert!(app.flash.contains("blocked by guardrail"), "{}", app.flash);
+
+    app.guardrails[0].deny = false;
+    app.guardrails[0].max_bulk = Some(0);
+    app.handle_key(press(KeyCode::Char('V'))).unwrap();
+    assert!(app.flash.contains("exceeds the max"), "{}", app.flash);
+}
+
+#[tokio::test]
+async fn csr_typed_guardrail_confirmation_shows_the_request_details() {
+    for (level, expected) in [
+        ("type-resource-name", "csr-a"),
+        ("type-context-name", "test"),
+    ] {
+        let mut app = csr_app(&[csr("csr-a", json!([]))]);
+        let expected = if level == "type-context-name" {
+            app.cluster.context.clone()
+        } else {
+            expected.to_string()
+        };
+        app.guardrails = vec![crate::config::Guardrail {
+            actions: vec!["approve".into()],
+            confirmation: Some(level.into()),
+            ..Default::default()
+        }];
+        app.handle_key(press(KeyCode::Char('V'))).unwrap();
+        assert_eq!(app.mode, Mode::Prompt, "{level}");
+        for part in [
+            "Approve CSR csr-a?",
+            "requester: system:node:n1",
+            "signer: kubernetes.io/kube-apiserver-client",
+            "usages: digital signature, client auth",
+            "grants cluster access",
+            &format!("type '{expected}' to confirm"),
+        ] {
+            assert!(
+                app.prompt_label.contains(part),
+                "{level} {part}: {}",
+                app.prompt_label
+            );
+        }
+        assert!(matches!(
+            &app.prompt_kind,
+            Some(PromptKind::GuardConfirm { expected: e, .. }) if *e == expected
+        ));
+    }
+}

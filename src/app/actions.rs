@@ -294,7 +294,10 @@ impl App {
             .map(|o| (o.metadata.name.clone().unwrap_or_default(), String::new()))
             .collect();
         let plural = self.kind_plural.clone();
-        let Some(level) = self.guard(action, &plural, &targets, ConfirmLevel::Plain) else {
+        // CSRs are cluster-scoped and have no namespace to match, so a rule
+        // with a `namespaces` filter applies to them instead of never matching.
+        let Some(level) = self.guard_scope(action, &plural, &targets, ConfirmLevel::Plain, true)
+        else {
             return;
         };
         let mut label = csr_confirm_label(approve, &objs);
@@ -305,6 +308,7 @@ impl App {
             [(name, _)] => name.clone(),
             many => many.len().to_string(),
         };
+        let details = label.clone();
         self.begin_guarded(
             ConfirmAction::CsrDecision {
                 kind,
@@ -315,6 +319,11 @@ impl App {
             level,
             name_hint,
         );
+        // The typed prompt replaces the confirm popup, so carry the review
+        // text (requester, signer, usages, warning) into it.
+        if self.mode == Mode::Prompt {
+            self.prompt_label = format!("{details}\n\n{}", self.prompt_label);
+        }
     }
 
     pub(super) fn do_csr_decision(&mut self, kind: Kind, approve: bool, objs: Vec<DynamicObject>) {
