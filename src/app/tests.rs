@@ -41039,9 +41039,42 @@ async fn csr_typed_guardrail_confirmation_shows_the_request_details() {
                 app.prompt_label
             );
         }
+        let (review, instruction) = app.prompt_label.split_once("⚠ guardrail").unwrap();
+        assert!(
+            review
+                .trim_end()
+                .ends_with("approving grants cluster access"),
+            "{level}: warning not right above the instruction: {review}"
+        );
+        assert!(instruction.contains(&format!("type '{expected}' to confirm")));
         assert!(matches!(
             &app.prompt_kind,
             Some(PromptKind::GuardConfirm { expected: e, .. }) if *e == expected
         ));
     }
+}
+
+#[tokio::test]
+async fn csr_bulk_approval_warns_before_the_per_request_details() {
+    let names: Vec<String> = (0..12).map(|i| format!("csr-{i:02}")).collect();
+    let csrs: Vec<Value> = names.iter().map(|n| csr(n, json!([]))).collect();
+    let mut app = csr_app(&csrs);
+    for _ in &names {
+        app.handle_key(press(KeyCode::Char(' '))).unwrap();
+    }
+    app.handle_key(press(KeyCode::Char('V'))).unwrap();
+    assert_eq!(app.mode, Mode::Confirm);
+    let label = &app.confirm_label;
+    let warning = label.find("⚠ 12 client auth cert(s)").expect(label);
+    let first = label.find("csr-00\n").expect(label);
+    assert!(warning < first, "warning must precede the details: {label}");
+    assert!(
+        label.lines().take(4).any(|l| l.starts_with("⚠")),
+        "warning not within the first lines: {label}"
+    );
+
+    // Denying has nothing to warn about.
+    app.handle_key(press(KeyCode::Esc)).unwrap();
+    app.handle_key(press(KeyCode::Char('N'))).unwrap();
+    assert!(!app.confirm_label.contains('⚠'), "{}", app.confirm_label);
 }

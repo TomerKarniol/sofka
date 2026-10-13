@@ -224,8 +224,19 @@ fn csr_grants_cluster_access(obj: &DynamicObject) -> bool {
             .is_some_and(|u| u.iter().any(|u| u.as_str() == Some("client auth")))
 }
 
-/// The confirm text for approving or denying `objs`: requester, signer and
-/// usages per CSR, plus a warning when an approval grants cluster access.
+/// The warning for approving CSRs that grant cluster access, or `None`.
+pub(super) fn csr_access_warning(approve: bool, objs: &[DynamicObject]) -> Option<String> {
+    let risky = objs.iter().filter(|o| csr_grants_cluster_access(o)).count();
+    (approve && risky > 0).then(|| {
+        format!(
+            "⚠ {risky} client auth cert(s) from kubernetes.io/kube-apiserver-client — approving grants cluster access"
+        )
+    })
+}
+
+/// The confirm text for approving or denying `objs`: the cluster-access
+/// warning right under the heading, where a long bulk list cannot push it out
+/// of view, then requester, signer and usages per CSR.
 pub(super) fn csr_confirm_label(approve: bool, objs: &[DynamicObject]) -> String {
     let verb = if approve { "Approve" } else { "Deny" };
     let field = |o: &DynamicObject, path: &str| {
@@ -240,6 +251,9 @@ pub(super) fn csr_confirm_label(approve: bool, objs: &[DynamicObject]) -> String
         [one] => format!("{verb} CSR {}?", name(one)),
         many => format!("{verb} {} CSRs?", many.len()),
     };
+    if let Some(warning) = csr_access_warning(approve, objs) {
+        label.push_str(&format!("\n\n{warning}"));
+    }
     for o in objs {
         let usages = o
             .data
@@ -258,12 +272,6 @@ pub(super) fn csr_confirm_label(approve: bool, objs: &[DynamicObject]) -> String
             name(o),
             field(o, "/spec/username"),
             field(o, "/spec/signerName"),
-        ));
-    }
-    let risky = objs.iter().filter(|o| csr_grants_cluster_access(o)).count();
-    if approve && risky > 0 {
-        label.push_str(&format!(
-            "\n\n⚠ {risky} client auth cert(s) from kubernetes.io/kube-apiserver-client — approving grants cluster access"
         ));
     }
     label

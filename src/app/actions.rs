@@ -309,6 +309,7 @@ impl App {
             many => many.len().to_string(),
         };
         let details = label.clone();
+        let warning = csr_access_warning(approve, &objs);
         self.begin_guarded(
             ConfirmAction::CsrDecision {
                 kind,
@@ -320,9 +321,11 @@ impl App {
             name_hint,
         );
         // The typed prompt replaces the confirm popup, so carry the review
-        // text (requester, signer, usages, warning) into it.
+        // text into it. It scrolls to the bottom while typing, so the warning
+        // is repeated right above what to type.
         if self.mode == Mode::Prompt {
-            self.prompt_label = format!("{details}\n\n{}", self.prompt_label);
+            let warning = warning.map(|w| format!("{w}\n\n")).unwrap_or_default();
+            self.prompt_label = format!("{details}\n\n{warning}{}", self.prompt_label);
         }
     }
 
