@@ -898,6 +898,9 @@ include those conditions. Row filters can search the route paths.
   as dotted keys, with the level,
   message, keys, and values styled apart. The setting stays active for the session. Filters and application copy/save use raw records.
   See [Log controls](debugging.md#log-controls) for limits.
+- **Sideways log scrolling** (`←` / `→` or `h` / `l` in logs) moves unwrapped
+  lines 5 columns at a time so the end of a long line is reachable. It stops at
+  the widest line on screen. `w` wraps lines instead and resets the offset.
 - **Log markers** (`m` in logs) add visual separators at the buffer tail.
   Markers stay visible through filters, do not move a paused viewport, and are
   excluded from sofka copy/save. Clearing or replacing the buffer removes them.

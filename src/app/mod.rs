@@ -1397,6 +1397,9 @@ pub struct LogsView {
     /// handler convert trimmed *lines* into the display *rows* they occupied
     /// when shifting a paused scroll anchor.
     pub last_wrap_width: usize,
+    /// Furthest useful horizontal offset for the rows on screen at the last
+    /// draw (0 while wrapping), so `←`/`→` clamp without scanning the buffer.
+    pub max_hscroll: usize,
     /// The current source, retained for stream restarts.
     source: Option<LogSource>,
     /// Filter/wrap index over [`Self::view`], maintained incrementally.
@@ -1425,6 +1428,7 @@ impl Default for LogsView {
             viewport_rows: 0,
             viewport_h: 0,
             last_wrap_width: 0,
+            max_hscroll: 0,
             source: None,
             index: LogIndex::default(),
         }

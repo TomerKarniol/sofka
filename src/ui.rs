@@ -2233,8 +2233,17 @@ fn draw_logs(frame: &mut Frame, app: &mut App, area: Rect) {
         format!(" {}{} ", app.logs.view.title, flags)
     };
 
-    // The rows are already the exact viewport slice — no Paragraph scroll or
-    // wrap, so ratatui can't re-lay-out (and disagree with) the math above.
+    // The rows are already the exact viewport slice, so ratatui never wraps
+    // them (and can't disagree with the math above); the only Paragraph scroll
+    // is the sideways offset for unwrapped lines wider than the pane.
+    let widest = rows.iter().map(Line::width).max().unwrap_or(0);
+    app.logs.max_hscroll = if wrap {
+        0
+    } else {
+        widest.saturating_sub(inner_w)
+    };
+    let hscroll = app.logs.view.hscroll.min(app.logs.max_hscroll);
+    app.logs.view.hscroll = hscroll;
     let block = if fullscreen {
         // Borderless: `Block::inner` still reserves one row for the top title,
         // matching the fullscreen `inner_h` above.
@@ -2246,7 +2255,12 @@ fn draw_logs(frame: &mut Frame, app: &mut App, area: Rect) {
             .border_style(Style::default().fg(theme::green()))
             .title(Span::styled(title, theme::title()))
     };
-    frame.render_widget(Paragraph::new(rows).block(block), area);
+    frame.render_widget(
+        Paragraph::new(rows)
+            .block(block)
+            .scroll((0, hscroll.min(u16::MAX as usize) as u16)),
+        area,
+    );
     if !fullscreen {
         draw_border_scrollbar(
             frame,
@@ -3118,6 +3132,10 @@ fn build_help(app: &App, width: usize) -> (Vec<Line<'static>>, String, HelpSecti
             "edit local port of the selected mapping"
         } else if scope == "logs" && action == Action::Lookback {
             "set lookback (s/m/h/d/w, e.g. 1h30m); kubelet logs also accept tail"
+        } else if scope == "logs" && action == Action::Left {
+            "scroll left (unwrapped lines)"
+        } else if scope == "logs" && action == Action::Right {
+            "scroll right (unwrapped lines)"
         } else if action == Action::LogMarker {
             "add visual marker at the log tail (excluded from copy/save)"
         } else if action == Action::Fullscreen {
