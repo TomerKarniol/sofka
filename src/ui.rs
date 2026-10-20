@@ -9,6 +9,7 @@ use ratatui::widgets::{
     Block, BorderType, Borders, Clear, Gauge, HighlightSpacing, List, ListItem, ListState,
     Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Sparkline,
 };
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{App, DEFAULT_SORT_LABEL, Mode, Pane, SuggestKind, TRANSFER_MENU_ITEMS};
@@ -2322,10 +2323,12 @@ fn skip_columns(line: Line<'_>, skip: usize) -> Line<'static> {
     let mut col = 0usize;
     for span in line.spans {
         let mut kept = String::new();
-        for c in span.content.chars() {
-            let w = UnicodeWidthChar::width(c).unwrap_or(0);
+        // Whole graphemes, measured like `Line::width` (which sets the scroll
+        // limit): a joined emoji such as 👩‍💻 is two columns, not four.
+        for g in span.content.graphemes(true) {
+            let w = UnicodeWidthStr::width(g);
             if col >= skip {
-                kept.push(c);
+                kept.push_str(g);
             } else if col + w > skip {
                 kept.push_str(&" ".repeat(col + w - skip));
             }
@@ -6557,6 +6560,11 @@ mod tests {
         assert_eq!(cut.spans.len(), 1);
         assert_eq!(skip_columns(line.clone(), 1).spans[0].style, red);
         assert_eq!(skip_columns(line, 99).width(), 0);
+
+        let joined = Line::from("👩‍💻xEND");
+        assert_eq!(joined.width(), 6);
+        assert_eq!(skip_columns(joined.clone(), 2).to_string(), "xEND");
+        assert_eq!(skip_columns(joined, 1).to_string(), " xEND");
     }
 
     /// The PVC browser pads file names into a fixed column. A CJK name is
