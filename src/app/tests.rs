@@ -21248,6 +21248,28 @@ async fn logs_arrow_keys_scroll_long_unwrapped_lines_sideways() {
 }
 
 #[tokio::test]
+async fn logs_sideways_scroll_reaches_the_end_of_a_line_past_u16_columns() {
+    use ratatui::{Terminal, backend::TestBackend};
+    let (mut app, _rx) = test_app();
+    app.mode = Mode::Logs;
+    app.return_mode = Mode::Table;
+    app.handle_msg(Msg::LogLines {
+        generation: app.log_gen,
+        lines: vec![format!("{}SUFFIX", "x".repeat(70_000))],
+    });
+    let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    assert!(app.logs.max_hscroll > usize::from(u16::MAX));
+
+    for _ in 0..app.logs.max_hscroll / 5 + 1 {
+        app.handle_key(press(KeyCode::Right)).unwrap();
+    }
+    term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    assert_eq!(app.logs.view.hscroll, app.logs.max_hscroll);
+    assert!(format!("{:?}", term.backend().buffer()).contains("SUFFIX"));
+}
+
+#[tokio::test]
 async fn logs_fullscreen_toggles_with_shift_f() {
     let (mut app, _rx) = test_app();
     app.mode = Mode::Logs;
