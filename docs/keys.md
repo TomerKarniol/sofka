@@ -202,7 +202,7 @@ was started from. See [Manifest browser](features.md#manifest-browser).
 
 ## Logs view
 
-`/` filter (substring · `/regex/` · `!invert`) · `s`/`f` autoscroll · `w` wrap ·
+`/` filter (substring · `/regex/` · `!invert`) · `s`/`f` autoscroll · `w` wrap · `←`/`→` or `h`/`l` scroll sideways (unwrapped) ·
 `J` JSON view (raw/record/pretty) · `Ctrl+Z` warning/error filter · `m` visual marker · `t` timestamps · `x` stop/resume stream · `z` clear buffer · `c` copy buffer ·
 `a` default/all containers (pods with a default-container annotation) ·
 `ctrl-s` save to a file in `save_dir` · `F` fullscreen (no chrome, clean text selection) ·

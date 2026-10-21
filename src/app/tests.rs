@@ -21205,6 +21205,71 @@ async fn kubelet_lookback_prompt_cancel_and_invalid_input_keep_stream() {
 }
 
 #[tokio::test]
+async fn logs_arrow_keys_scroll_long_unwrapped_lines_sideways() {
+    let (mut app, _rx) = test_app();
+    app.mode = Mode::Logs;
+    app.return_mode = Mode::Table;
+    use ratatui::{Terminal, backend::TestBackend};
+    let long = format!("{}END", "x".repeat(100));
+    app.handle_msg(Msg::LogLines {
+        generation: app.log_gen,
+        lines: vec![long],
+    });
+    let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    let screen = |term: &Terminal<TestBackend>| format!("{:?}", term.backend().buffer());
+
+    term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    assert!(!screen(&term).contains("END"));
+
+    for _ in 0..30 {
+        app.handle_key(press(KeyCode::Right)).unwrap();
+        term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    }
+    assert!(
+        screen(&term).contains("END"),
+        "hs={} max={}\n{}",
+        app.logs.view.hscroll,
+        app.logs.max_hscroll,
+        screen(&term)
+    );
+    assert_eq!(
+        app.logs.view.hscroll, app.logs.max_hscroll,
+        "clamped at the end"
+    );
+
+    app.handle_key(press(KeyCode::Left)).unwrap();
+    assert_eq!(app.logs.view.hscroll, app.logs.max_hscroll - 5);
+
+    app.handle_key(press(KeyCode::Char('w'))).unwrap();
+    assert_eq!(
+        app.logs.view.hscroll, 0,
+        "wrap snaps back to the left margin"
+    );
+}
+
+#[tokio::test]
+async fn logs_sideways_scroll_reaches_the_end_of_a_line_past_u16_columns() {
+    use ratatui::{Terminal, backend::TestBackend};
+    let (mut app, _rx) = test_app();
+    app.mode = Mode::Logs;
+    app.return_mode = Mode::Table;
+    app.handle_msg(Msg::LogLines {
+        generation: app.log_gen,
+        lines: vec![format!("{}SUFFIX", "x".repeat(70_000))],
+    });
+    let mut term = Terminal::new(TestBackend::new(40, 10)).unwrap();
+    term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    assert!(app.logs.max_hscroll > usize::from(u16::MAX));
+
+    for _ in 0..app.logs.max_hscroll / 5 + 1 {
+        app.handle_key(press(KeyCode::Right)).unwrap();
+    }
+    term.draw(|f| crate::ui::draw(f, &mut app)).unwrap();
+    assert_eq!(app.logs.view.hscroll, app.logs.max_hscroll);
+    assert!(format!("{:?}", term.backend().buffer()).contains("SUFFIX"));
+}
+
+#[tokio::test]
 async fn logs_fullscreen_toggles_with_shift_f() {
     let (mut app, _rx) = test_app();
     app.mode = Mode::Logs;

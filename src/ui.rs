@@ -9,6 +9,7 @@ use ratatui::widgets::{
     Block, BorderType, Borders, Clear, Gauge, HighlightSpacing, List, ListItem, ListState,
     Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Sparkline,
 };
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::app::{App, DEFAULT_SORT_LABEL, Mode, Pane, SuggestKind, TRANSFER_MENU_ITEMS};
@@ -2233,8 +2234,24 @@ fn draw_logs(frame: &mut Frame, app: &mut App, area: Rect) {
         format!(" {}{} ", app.logs.view.title, flags)
     };
 
-    // The rows are already the exact viewport slice — no Paragraph scroll or
-    // wrap, so ratatui can't re-lay-out (and disagree with) the math above.
+    // The rows are already the exact viewport slice, so ratatui never wraps
+    // them (and can't disagree with the math above). The sideways offset is
+    // applied by cutting columns off each row, since `Paragraph::scroll` takes
+    // a `u16` and would cap how far a very long line can be scrolled.
+    let widest = rows.iter().map(Line::width).max().unwrap_or(0);
+    app.logs.max_hscroll = if wrap {
+        0
+    } else {
+        widest.saturating_sub(inner_w)
+    };
+    let hscroll = app.logs.view.hscroll.min(app.logs.max_hscroll);
+    app.logs.view.hscroll = hscroll;
+    if hscroll > 0 {
+        rows = rows
+            .into_iter()
+            .map(|line| skip_columns(line, hscroll))
+            .collect();
+    }
     let block = if fullscreen {
         // Borderless: `Block::inner` still reserves one row for the top title,
         // matching the fullscreen `inner_h` above.
@@ -2296,6 +2313,36 @@ pub(crate) fn wrapped_height(raw: &str, width: usize) -> usize {
         col += w;
     }
     rows
+}
+
+/// Drop the first `skip` display columns of a styled line, keeping the spans'
+/// styles. A wide glyph cut in half by the boundary becomes spaces so the
+/// remaining text stays aligned.
+fn skip_columns(line: Line<'_>, skip: usize) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut col = 0usize;
+    for span in line.spans {
+        let mut kept = String::new();
+        // Whole graphemes, measured like `Line::width` (which sets the scroll
+        // limit): a joined emoji such as 👩‍💻 is two columns, not four.
+        for g in span.content.graphemes(true) {
+            let w = UnicodeWidthStr::width(g);
+            if col >= skip {
+                kept.push_str(g);
+            } else if col + w > skip {
+                kept.push_str(&" ".repeat(col + w - skip));
+            }
+            col += w;
+        }
+        if !kept.is_empty() {
+            spans.push(Span::styled(kept, span.style));
+        }
+    }
+    Line {
+        style: line.style,
+        alignment: line.alignment,
+        ..Line::from(spans)
+    }
 }
 
 /// Greedily split a styled line into rows of at most `width` display columns,
@@ -3118,6 +3165,10 @@ fn build_help(app: &App, width: usize) -> (Vec<Line<'static>>, String, HelpSecti
             "edit local port of the selected mapping"
         } else if scope == "logs" && action == Action::Lookback {
             "set lookback (s/m/h/d/w, e.g. 1h30m); kubelet logs also accept tail"
+        } else if scope == "logs" && action == Action::Left {
+            "scroll left (unwrapped lines)"
+        } else if scope == "logs" && action == Action::Right {
+            "scroll right (unwrapped lines)"
         } else if action == Action::LogMarker {
             "add visual marker at the log tail (excluded from copy/save)"
         } else if action == Action::Fullscreen {
@@ -6499,6 +6550,22 @@ fn centered_rect_with_min(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skip_columns_keeps_styles_and_pads_split_wide_glyphs() {
+        let red = Style::default().fg(Color::Red);
+        let line = Line::from(vec![Span::styled("ab", red), Span::raw("日本c")]);
+        let cut = skip_columns(line.clone(), 3);
+        assert_eq!(cut.to_string(), " 本c");
+        assert_eq!(cut.spans.len(), 1);
+        assert_eq!(skip_columns(line.clone(), 1).spans[0].style, red);
+        assert_eq!(skip_columns(line, 99).width(), 0);
+
+        let joined = Line::from("👩‍💻xEND");
+        assert_eq!(joined.width(), 6);
+        assert_eq!(skip_columns(joined.clone(), 2).to_string(), "xEND");
+        assert_eq!(skip_columns(joined, 1).to_string(), " xEND");
+    }
 
     /// The PVC browser pads file names into a fixed column. A CJK name is
     /// twice as wide as it is long, so counting characters would push the size
