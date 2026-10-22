@@ -19,6 +19,10 @@ pub(super) fn set_image_patch(plural: &str, container: &str, image: &str) -> Val
     }
 }
 
+pub(super) fn chart_version_patch(version: &str) -> Value {
+    json!({ "spec": { "chart": { "spec": { "version": version } } } })
+}
+
 pub(super) fn scale_patch(replicas: i32) -> Value {
     json!({ "spec": { "replicas": replicas } })
 }
@@ -573,6 +577,21 @@ pub(super) fn xray_pool_plurals(root_kind: &str) -> &'static [&'static str] {
 }
 
 impl App {
+    pub fn flux_helmrelease_kind(&self) -> bool {
+        self.kind.as_ref().is_some_and(|kind| {
+            kind.ar.group == "helm.toolkit.fluxcd.io" && kind.ar.plural == "helmreleases"
+        })
+    }
+
+    /// Whether a kind-specific action applies to the current kind. Plurals are
+    /// not unique across API groups, so `helmreleases` only counts for Flux.
+    pub(super) fn action_applies(&self, action: Action) -> bool {
+        action.kinds().is_some_and(|kinds| {
+            kinds.contains(&self.kind_plural.as_str())
+                && (self.kind_plural != "helmreleases" || self.flux_helmrelease_kind())
+        })
+    }
+
     /// Whether the current kind supports the Flux suspend/resume menu (`t`).
     pub fn flux_suspendable(&self) -> bool {
         self.kind.as_ref().is_some_and(|kind| {

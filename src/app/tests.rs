@@ -13905,6 +13905,91 @@ async fn enter_on_helmrelease_opens_helm_history() {
     assert_eq!(app.kind_plural, "helmreleases");
 }
 
+fn helmrelease_app(spec: serde_json::Value) -> (App, tokio::sync::mpsc::Receiver<Msg>) {
+    let (mut app, rx) = test_app();
+    app.switch_kind("helmreleases");
+    apply(
+        &mut app,
+        json!({
+            "apiVersion": "helm.toolkit.fluxcd.io/v2", "kind": "HelmRelease",
+            "metadata": {"name": "podinfo", "namespace": "flux-system"},
+            "spec": spec
+        }),
+    );
+    app.table_state.select(Some(0));
+    (app, rx)
+}
+
+#[tokio::test]
+async fn set_image_key_on_helmrelease_rejects_an_empty_version() {
+    let (mut app, _rx) = helmrelease_app(json!({"chart": {"spec": {"chart": "podinfo"}}}));
+    app.handle_key(press(KeyCode::Char('i'))).unwrap();
+    assert_eq!(app.mode, Mode::Prompt);
+    assert_eq!(app.prompt_input, "");
+    app.handle_key(press(KeyCode::Enter)).unwrap();
+    assert_eq!(app.flash, "no chart version given");
+    assert!(app.flash_err);
+}
+
+#[tokio::test]
+async fn set_image_key_on_helmrelease_with_chart_ref_points_at_the_source() {
+    let (mut app, _rx) = helmrelease_app(json!({
+        "chartRef": {"kind": "OCIRepository", "name": "podinfo"}
+    }));
+    app.handle_key(press(KeyCode::Char('i'))).unwrap();
+    assert_eq!(app.mode, Mode::Table);
+    assert!(app.prompt_kind.is_none());
+    assert_eq!(
+        app.flash,
+        "chart version comes from the source in spec.chartRef - set it there"
+    );
+    assert!(app.flash_err);
+}
+
+#[tokio::test]
+async fn set_image_key_ignores_helmreleases_outside_flux() {
+    let (mut app, _rx) = test_app();
+    app.cluster
+        .register_kind("example.com", "HelmRelease", "helmreleases", true);
+    app.switch_kind("helmreleases");
+    apply(
+        &mut app,
+        json!({
+            "apiVersion": "example.com/v1", "kind": "HelmRelease",
+            "metadata": {"name": "podinfo", "namespace": "default"},
+            "spec": {"chart": {"spec": {"version": "1.0.0"}}}
+        }),
+    );
+    app.table_state.select(Some(0));
+    app.handle_key(press(KeyCode::Char('i'))).unwrap();
+    assert_eq!(app.mode, Mode::Table);
+    assert!(app.prompt_kind.is_none());
+    assert!(app.flash.contains("Flux HelmReleases"), "{}", app.flash);
+
+    app.plugins = vec![crate::config::Plugin {
+        name: "release-cmd".into(),
+        key: "i".into(),
+        command: "true".into(),
+        scopes: vec!["helmreleases".into()],
+        mutating: Some(false),
+        ..Default::default()
+    }];
+    app.handle_key(press(KeyCode::Char('i'))).unwrap();
+    assert!(matches!(app.pending, Some(Suspend::Shell(_))));
+    assert!(app.prompt_kind.is_none());
+}
+
+#[tokio::test]
+async fn set_image_key_on_helmrelease_is_refused_in_read_only_mode() {
+    let (mut app, _rx) = helmrelease_app(json!({
+        "chart": {"spec": {"chart": "podinfo", "version": "6.5.0"}}
+    }));
+    app.readonly = true;
+    app.handle_key(press(KeyCode::Char('i'))).unwrap();
+    assert_eq!(app.mode, Mode::Table);
+    assert_eq!(app.flash, "read-only mode — action disabled");
+}
+
 #[tokio::test]
 async fn helm_list_shows_only_latest_revision_per_release() {
     let (mut app, _rx) = test_app();
