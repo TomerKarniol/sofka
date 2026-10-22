@@ -42745,3 +42745,114 @@ async fn reload_rejects_skin_hex_with_more_than_one_prefix() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+fn hint_cells(app: &mut App, width: u16, height: u16, hint: &str) -> Vec<ratatui::buffer::Cell> {
+    use ratatui::{Terminal, backend::TestBackend};
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+    terminal.draw(|f| crate::ui::draw(f, app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let len = hint.chars().count() as u16;
+    (0..height)
+        .flat_map(|y| (0..=width.saturating_sub(len)).map(move |x| (x, y)))
+        .find(|&(x, y)| {
+            (0..len)
+                .map(|i| buffer[(x + i, y)].symbol())
+                .collect::<String>()
+                == hint
+        })
+        .map(|(x, y)| (0..len).map(|i| buffer[(x + i, y)].clone()).collect())
+        .unwrap_or_else(|| panic!("{hint:?} not rendered"))
+}
+
+fn assert_hint_key(cell: &ratatui::buffer::Cell) {
+    assert_eq!(cell.fg, crate::theme::sky(), "{cell:?}");
+    assert!(
+        cell.modifier.contains(ratatui::style::Modifier::BOLD),
+        "{cell:?}"
+    );
+}
+
+#[tokio::test]
+async fn status_bar_and_popup_footer_style_hint_keys() {
+    let (mut app, _rx) = test_app();
+    app.switch_kind("pods");
+    apply(&mut app, container_details_pod());
+    let command = hint_cells(&mut app, 200, 30, "::command");
+    assert_hint_key(&command[0]);
+    for label in &command[1..] {
+        assert_eq!(label.fg, crate::theme::dim().fg.unwrap(), "{label:?}");
+        assert!(
+            !label.modifier.contains(ratatui::style::Modifier::BOLD),
+            "{label:?}"
+        );
+    }
+
+    app.handle_key(press(KeyCode::Home)).unwrap();
+    app.handle_key(press(KeyCode::Enter)).unwrap();
+    assert_eq!(app.mode, Mode::Containers);
+    let key = app
+        .keymap
+        .first_label("containers", Action::PreviousLogs)
+        .to_string();
+    let previous = hint_cells(&mut app, 200, 30, &format!("{key}:previous"));
+    let key_width = key.chars().count();
+    previous[..key_width].iter().for_each(assert_hint_key);
+    for label in &previous[key_width..] {
+        assert_eq!(label.fg, crate::theme::dim().fg.unwrap(), "{label:?}");
+    }
+}
+
+fn assert_literal_hint(app: &mut App, hint: &str, keys: &[&str]) {
+    let cells = hint_cells(app, 200, 40, hint);
+    let mut styled = vec![false; cells.len()];
+    for key in keys {
+        let at = hint
+            .find(key)
+            .unwrap_or_else(|| panic!("{key:?} not in {hint:?}"));
+        let start = hint[..at].chars().count();
+        styled[start..start + key.chars().count()].fill(true);
+    }
+    for (cell, key) in cells.iter().zip(styled) {
+        if key {
+            assert_hint_key(cell);
+        } else {
+            assert!(
+                !cell.modifier.contains(ratatui::style::Modifier::BOLD),
+                "{hint:?}: {cell:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn drain_footers_style_their_keys() {
+    let (mut app, mut rx, _api) = drain_app(DrainApiState::default());
+    app.guardrails = vec![crate::config::Guardrail {
+        actions: vec!["drain".into()],
+        confirmation: Some("type-resource-name".into()),
+        ..Default::default()
+    }];
+    drain_open(&mut app);
+    app.handle_key(press(KeyCode::Enter)).unwrap();
+    assert_literal_hint(&mut app, "Enter: confirm   Esc: cancel", &["Enter", "Esc"]);
+    for c in "node-a".chars() {
+        app.handle_key(press(KeyCode::Char(c))).unwrap();
+    }
+    app.handle_key(press(KeyCode::Enter)).unwrap();
+    drain_until(&mut app, &mut rx, |app| app.drain.done).await;
+    assert_literal_hint(&mut app, "Enter/Esc: close", &["Enter/Esc"]);
+}
+
+#[tokio::test]
+async fn command_failure_footer_styles_its_keys() {
+    let (mut app, _rx) = app_with_pod();
+    app.handle_key(press(KeyCode::Char('s'))).unwrap();
+    complete_failed_shell(&mut app, MISSING_SHELL);
+    app.expire_flash();
+    assert!(app.command_failure_visible());
+    assert_literal_hint(
+        &mut app,
+        "d Start debug container · esc/enter dismiss · PgUp/PgDn scroll",
+        &["d", "esc/enter", "PgUp/PgDn"],
+    );
+}
