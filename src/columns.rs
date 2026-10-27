@@ -2872,8 +2872,15 @@ pub fn fmt_cpu(milli: i64) -> String {
     } else if milli < 1000 {
         format!("{milli}m")
     } else {
-        let cores = format!("{:.2}", milli as f64 / 1000.0);
-        cores.trim_end_matches('0').trim_end_matches('.').into()
+        let (mut whole, mut hundredths) = (milli / 1000, (milli % 1000 + 5) / 10);
+        if hundredths == 100 {
+            (whole, hundredths) = (whole + 1, 0);
+        }
+        match hundredths {
+            0 => whole.to_string(),
+            h if h % 10 == 0 => format!("{whole}.{}", h / 10),
+            h => format!("{whole}.{h:02}"),
+        }
     }
 }
 
@@ -2950,6 +2957,10 @@ mod tests {
         assert_eq!(fmt_cpu(1234), "1.23");
         assert_eq!(fmt_cpu(1004), "1");
         assert_eq!(fmt_cpu(64000), "64");
+        assert_eq!(fmt_cpu(1005), "1.01");
+        assert_eq!(fmt_cpu(1995), "2");
+        assert_eq!(fmt_cpu(1050), "1.05");
+        assert_eq!(fmt_cpu(i64::MAX), "9223372036854775.81");
     }
 
     #[test]
